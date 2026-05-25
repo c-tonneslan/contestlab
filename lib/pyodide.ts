@@ -144,14 +144,26 @@ export async function runLeetCodeSubmit(
 
   // Capture stderr in case the user prints during a run.
   py.runPython(`import sys, io\nsys.stderr = io.StringIO()`);
+
   let exception = "";
+  let stderr = "";
+  let verdict = "";
+  let passedCount = 0;
+  let message = "";
+
   try {
     py.runPython(fullSource);
+    verdict = py.runPython("_result[0]");
+    passedCount = py.runPython("_result[1]");
+    message = py.runPython("_result[2]");
+    stderr = py.runPython("sys.stderr.getvalue()");
   } catch (e) {
     exception = e instanceof Error ? e.message : String(e);
+  } finally {
+    try {
+      py.runPython("sys.stderr = sys.__stderr__");
+    } catch {}
   }
-  const stderr: string = py.runPython("sys.stderr.getvalue()");
-  py.runPython("sys.stderr = sys.__stderr__");
 
   if (exception) {
     return {
@@ -164,10 +176,6 @@ export async function runLeetCodeSubmit(
     };
   }
 
-  const verdict = py.runPython("_result[0]");
-  const passedCount = py.runPython("_result[1]");
-  const message = py.runPython("_result[2]");
-
   if (verdict === "ok") {
     return {
       passed: true,
@@ -177,7 +185,6 @@ export async function runLeetCodeSubmit(
       durationMs: performance.now() - start,
     };
   }
-  // Pull the failing assertion's source line out of the test field.
   const testLine = extractAssertLine(test, passedCount);
   return {
     passed: false,
@@ -212,21 +219,28 @@ export async function runLeetCodeCustom(
     `except Exception as _e:\n` +
     `    _out = ""\n` +
     `    _err = f"{type(_e).__name__}: {_e}"\n`;
-  let exception = "";
+  let result = "";
+  let err = "";
+  let stderr = "";
   try {
     py.runPython(fullSource);
+    result = py.runPython("_out");
+    err = py.runPython("_err");
+    stderr = py.runPython("sys.stderr.getvalue()");
   } catch (e) {
-    exception = e instanceof Error ? e.message : String(e);
+    // The source itself failed to compile/run (syntax error in user code,
+    // missing reference, etc). The JS-side exception has the traceback.
+    err = e instanceof Error ? e.message : String(e);
+  } finally {
+    try {
+      py.runPython("sys.stderr = sys.__stderr__");
+    } catch {}
   }
-  const result = py.runPython("_out");
-  const err = py.runPython("_err");
-  const stderr = py.runPython("sys.stderr.getvalue()");
-  py.runPython("sys.stderr = sys.__stderr__");
   return {
     result,
-    stderr: err || stderr || exception,
+    stderr: err || stderr,
     durationMs: performance.now() - start,
-    ok: !err && !exception,
+    ok: !err,
   };
 }
 
