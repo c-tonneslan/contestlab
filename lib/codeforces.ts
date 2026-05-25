@@ -1,103 +1,97 @@
 /**
- * Codeforces API client.
+ * Codeforces problem bank — bundled subset of open-r1/codeforces from
+ * Hugging Face (CC-BY-4.0).
  *
- * Uses the public problemset.problems endpoint. No auth needed. The whole
- * problemset (~9000 problems) is one fetch; we cache it in memory for the
- * lifetime of the process.
- *
- * Docs: https://codeforces.com/apiHelp/methods#problemset.problems
+ * The dataset has full problem statements, examples, and official tests.
+ * We pre-fetched ~700 problems across difficulty bands via
+ * scripts/fetch-problems.mjs and bundled them into public/data/cf-*.json.
+ * At runtime we read from those JSON files — no live API call to
+ * Codeforces, no Cloudflare worries, no rate limits, statements + judge
+ * tests work for every problem.
  */
 
+import "server-only";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import type { Difficulty, Problem } from "@/types";
-import { DIFFICULTY_RATING_RANGES } from "@/types";
 
-interface CfProblem {
-  contestId?: number;
+interface BundledProblem {
+  id: string;
+  contestId: string;
   index: string;
-  name: string;
-  type: string;
-  rating?: number;
+  title: string;
+  rating: number;
   tags: string[];
+  timeLimit: number | null;
+  memoryLimit: number | null;
+  statement: string;
+  examples: { input: string; expected: string }[];
+  hiddenTests: { input: string; expected: string }[];
+  url: string;
 }
 
-interface CfProblemset {
-  status: string;
-  result: { problems: CfProblem[] };
+const cache: Partial<Record<Difficulty, BundledProblem[]>> = {};
+
+async function loadBand(difficulty: Difficulty): Promise<BundledProblem[]> {
+  if (cache[difficulty]) return cache[difficulty]!;
+  const file = path.join(process.cwd(), "public", "data", `cf-${difficulty}.json`);
+  const raw = await fs.readFile(file, "utf-8");
+  const arr = JSON.parse(raw) as BundledProblem[];
+  cache[difficulty] = arr;
+  return arr;
 }
 
-let cache: CfProblem[] | null = null;
-let cacheTime = 0;
-const CACHE_TTL_MS = 1000 * 60 * 60 * 12; // 12 hours
-
-export async function fetchProblemset(): Promise<CfProblem[]> {
-  const now = Date.now();
-  if (cache && now - cacheTime < CACHE_TTL_MS) return cache;
-
-  const res = await fetch("https://codeforces.com/api/problemset.problems", {
-    next: { revalidate: 60 * 60 * 6 },
-  });
-  if (!res.ok) throw new Error(`Codeforces returned ${res.status}`);
-  const data = (await res.json()) as CfProblemset;
-  if (data.status !== "OK") throw new Error("Codeforces returned non-OK");
-
-  cache = data.result.problems.filter((p) => p.rating && p.contestId);
-  cacheTime = now;
-  return cache;
-}
-
-/**
- * Pick a random problem matching the difficulty band. Optionally filter by
- * tags (e.g. ["dp", "graphs"]) to bias toward a pattern.
- */
 export async function pickProblem(
   difficulty: Difficulty,
   opts: { tags?: string[]; exclude?: string[] } = {},
-): Promise<CfProblem> {
-  const all = await fetchProblemset();
-  const [lo, hi] = DIFFICULTY_RATING_RANGES[difficulty];
-
-  let pool = all.filter((p) => p.rating! >= lo && p.rating! <= hi);
+): Promise<Problem> {
+  const pool = await loadBand(difficulty);
+  let candidates = pool;
   if (opts.tags && opts.tags.length > 0) {
-    pool = pool.filter((p) => opts.tags!.some((t) => p.tags.includes(t)));
+    const wanted = opts.tags.map((t) => t.toLowerCase());
+    const filtered = candidates.filter((p) =>
+      p.tags.some((t) => wanted.includes(t.toLowerCase())),
+    );
+    if (filtered.length > 0) candidates = filtered;
+    // If the tag filter empties the pool, fall back to the full band so
+    // the user still gets a contest (just without the pattern bias).
   }
   if (opts.exclude && opts.exclude.length > 0) {
-    pool = pool.filter((p) => !opts.exclude!.includes(cfId(p)));
+    const exclude = new Set(opts.exclude);
+    candidates = candidates.filter((p) => !exclude.has(p.id));
   }
-  if (pool.length === 0) {
-    throw new Error(`No Codeforces problem found for ${difficulty}`);
+  if (candidates.length === 0) {
+    throw new Error(`No problems for ${difficulty}`);
   }
-
-  return pool[Math.floor(Math.random() * pool.length)];
+  const picked = candidates[Math.floor(Math.random() * candidates.length)];
+  return toProblem(picked, difficulty);
 }
 
-export function cfId(p: CfProblem): string {
-  return `cf-${p.contestId}-${p.index}`;
-}
-
-export function cfUrl(p: CfProblem): string {
-  return `https://codeforces.com/problemset/problem/${p.contestId}/${p.index}`;
-}
-
-/**
- * Convert a Codeforces problem to our internal Problem shape.
- * We don't fetch the full statement (no API for that) — the user clicks
- * through to the Codeforces page. We do generate a stub for our own UI.
- */
-export function toProblem(p: CfProblem, difficulty: Difficulty): Problem {
+function toProblem(p: BundledProblem, difficulty: Difficulty): Problem {
+  const statement = appendAttribution(p.statement, p.url, p.timeLimit, p.memoryLimit);
   return {
-    id: cfId(p),
+    id: p.id,
     source: "codeforces",
-    title: `${p.contestId}${p.index}. ${p.name}`,
+    title: p.title,
     difficulty,
-    rating: p.rating!,
+    rating: p.rating,
     tags: p.tags,
-    statement:
-      `**Codeforces problem.** Open the original statement on Codeforces ` +
-      `to see input/output specs and constraints. Solve in Python; submit ` +
-      `here to test against your own custom inputs (the contest grader ` +
-      `runs your code with the inputs you paste).\n\n` +
-      `[View on Codeforces](${cfUrl(p)})`,
-    examples: [],
-    url: cfUrl(p),
+    statement,
+    examples: p.examples,
+    hiddenTests: p.hiddenTests,
+    url: p.url,
   };
+}
+
+function appendAttribution(
+  statement: string,
+  url: string,
+  timeLimit: number | null,
+  memoryLimit: number | null,
+): string {
+  const limits: string[] = [];
+  if (timeLimit) limits.push(`time limit: ${timeLimit}s`);
+  if (memoryLimit) limits.push(`memory: ${memoryLimit}MB`);
+  const limitsLine = limits.length > 0 ? `\n\n_${limits.join(", ")}_` : "";
+  return `${statement}${limitsLine}\n\n---\n_From Codeforces ([original](${url})), via the open-r1/codeforces dataset (CC-BY-4.0)._`;
 }

@@ -2,6 +2,8 @@
 
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import CodeEditor from "@/components/Editor";
 import Timer from "@/components/Timer";
 import { loadContest, saveContest } from "@/lib/storage";
@@ -186,8 +188,10 @@ export default function ProblemPage({
             </div>
           </div>
 
-          <div className="prose prose-invert prose-sm max-w-none whitespace-pre-wrap text-zinc-300">
-            {problem.statement}
+          <div className="prose prose-invert prose-sm max-w-none text-zinc-300">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {problem.statement}
+            </ReactMarkdown>
           </div>
 
           {problem.examples.length > 0 && (

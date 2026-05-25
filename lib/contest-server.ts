@@ -6,7 +6,7 @@
 
 import "server-only";
 import type { Contest, Difficulty, Problem } from "@/types";
-import { pickProblem, toProblem } from "./codeforces";
+import { pickProblem } from "./codeforces";
 import { generateProblem } from "./generate";
 
 const DIFFICULTIES: Difficulty[] = ["easy", "easy-medium", "medium", "hard"];
@@ -31,8 +31,7 @@ export async function assembleContest(opts: AssembleOptions = {}): Promise<Conte
       if (generatedSlots.has(difficulty)) {
         return generateProblem(difficulty, { pattern: opts.pattern });
       }
-      const cf = await pickProblem(difficulty, opts.pattern ? { tags: [opts.pattern] } : {});
-      return toProblem(cf, difficulty);
+      return pickProblem(difficulty, opts.pattern ? { tags: [opts.pattern] } : {});
     }),
   );
 
