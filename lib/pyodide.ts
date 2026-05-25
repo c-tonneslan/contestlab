@@ -113,6 +113,145 @@ sys.stderr = sys.__stderr__
   };
 }
 
+/**
+ * Run a LeetCode-style submission against the bundled test harness.
+ * Returns { passed: true } if all assertions pass, otherwise extracts
+ * the first failing assertion's information.
+ */
+export interface LcRunResult {
+  passed: boolean;
+  totalTests: number; // number of `assert` lines we saw in the harness
+  passedTests: number; // best-effort: count of asserts that ran before first failure
+  failure?: { message: string; testLine: string };
+  stderr: string;
+  durationMs: number;
+}
+
+export async function runLeetCodeSubmit(
+  prompt: string,
+  source: string,
+  entryPoint: string,
+  test: string,
+): Promise<LcRunResult> {
+  const py = await getPyodide();
+  const start = performance.now();
+  const totalTests = (test.match(/^\s*assert /gm) || []).length;
+
+  // We wrap each `assert ...` line so we count how many ran before failure.
+  // The wrapper increments a global counter before each assert.
+  const instrumentedTest = instrumentTest(test);
+  const fullSource = `${prompt}\n${source}\n${instrumentedTest}\n_passed = 0\ntry:\n    check(${entryPoint})\n    _result = ("ok", _passed, "")\nexcept AssertionError as _e:\n    _result = ("assert", _passed, str(_e) or "assertion failed")\nexcept Exception as _e:\n    _result = ("error", _passed, f"{type(_e).__name__}: {_e}")\n`;
+
+  // Capture stderr in case the user prints during a run.
+  py.runPython(`import sys, io\nsys.stderr = io.StringIO()`);
+  let exception = "";
+  try {
+    py.runPython(fullSource);
+  } catch (e) {
+    exception = e instanceof Error ? e.message : String(e);
+  }
+  const stderr: string = py.runPython("sys.stderr.getvalue()");
+  py.runPython("sys.stderr = sys.__stderr__");
+
+  if (exception) {
+    return {
+      passed: false,
+      totalTests,
+      passedTests: 0,
+      failure: { message: exception, testLine: "" },
+      stderr,
+      durationMs: performance.now() - start,
+    };
+  }
+
+  const verdict = py.runPython("_result[0]");
+  const passedCount = py.runPython("_result[1]");
+  const message = py.runPython("_result[2]");
+
+  if (verdict === "ok") {
+    return {
+      passed: true,
+      totalTests,
+      passedTests: totalTests,
+      stderr,
+      durationMs: performance.now() - start,
+    };
+  }
+  // Pull the failing assertion's source line out of the test field.
+  const testLine = extractAssertLine(test, passedCount);
+  return {
+    passed: false,
+    totalTests,
+    passedTests: passedCount,
+    failure: { message: String(message), testLine },
+    stderr,
+    durationMs: performance.now() - start,
+  };
+}
+
+/**
+ * Run a LeetCode function with custom arguments and return the result.
+ * `argsExpr` is the user-typed args, e.g. `nums = [2,7,11,15], target = 9`.
+ */
+export async function runLeetCodeCustom(
+  prompt: string,
+  source: string,
+  entryPoint: string,
+  argsExpr: string,
+): Promise<{ result: string; stderr: string; durationMs: number; ok: boolean }> {
+  const py = await getPyodide();
+  const start = performance.now();
+  const fullSource =
+    `${prompt}\n${source}\n` +
+    `import sys, io, json\n` +
+    `sys.stderr = io.StringIO()\n` +
+    `try:\n` +
+    `    _val = ${entryPoint}(${argsExpr})\n` +
+    `    _out = repr(_val)\n` +
+    `    _err = ""\n` +
+    `except Exception as _e:\n` +
+    `    _out = ""\n` +
+    `    _err = f"{type(_e).__name__}: {_e}"\n`;
+  let exception = "";
+  try {
+    py.runPython(fullSource);
+  } catch (e) {
+    exception = e instanceof Error ? e.message : String(e);
+  }
+  const result = py.runPython("_out");
+  const err = py.runPython("_err");
+  const stderr = py.runPython("sys.stderr.getvalue()");
+  py.runPython("sys.stderr = sys.__stderr__");
+  return {
+    result,
+    stderr: err || stderr || exception,
+    durationMs: performance.now() - start,
+    ok: !err && !exception,
+  };
+}
+
+function instrumentTest(test: string): string {
+  // Replace each `    assert X` line with a pair that increments a
+  // counter, then asserts. Done with a simple regex on indented `assert `.
+  return test.replace(
+    /^( +)assert (.+)$/gm,
+    "$1global _passed; assert $2; _passed = _passed + 1",
+  );
+}
+
+function extractAssertLine(test: string, passedCount: number): string {
+  // The (passedCount + 1)-th assert in the test is the one that failed.
+  const lines = test.split(/\r?\n/);
+  let seen = 0;
+  for (const line of lines) {
+    if (/^\s*assert\b/.test(line)) {
+      if (seen === passedCount) return line.trim();
+      seen++;
+    }
+  }
+  return "";
+}
+
 export function normalizeOutput(s: string): string {
   return s
     .split(/\r?\n/)

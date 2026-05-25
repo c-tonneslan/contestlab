@@ -8,10 +8,16 @@ import CodeEditor from "@/components/Editor";
 import Timer from "@/components/Timer";
 import { loadContest, saveContest } from "@/lib/storage";
 import { applySubmission } from "@/lib/contest";
-import { getPyodide, normalizeOutput, runPython } from "@/lib/pyodide";
+import {
+  getPyodide,
+  normalizeOutput,
+  runLeetCodeCustom,
+  runLeetCodeSubmit,
+  runPython,
+} from "@/lib/pyodide";
 import type { Contest, Problem, Submission, TestCase } from "@/types";
 
-const DEFAULT_STARTER = `import sys
+const STDIO_STARTER = `import sys
 input = sys.stdin.readline
 
 def solve():
@@ -30,7 +36,7 @@ export default function ProblemPage({
   const [contest, setContest] = useState<Contest | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [source, setSource] = useState("");
-  const [stdin, setStdin] = useState("");
+  const [testInput, setTestInput] = useState("");
   const [output, setOutput] = useState<string>("");
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -48,21 +54,36 @@ export default function ProblemPage({
     const p = c.problems.find((x) => x.id === problemId);
     if (p) {
       setProblem(p);
-      setSource(p.starterCode ?? DEFAULT_STARTER);
-      if (p.examples[0]) setStdin(p.examples[0].input);
+      setSource(p.starterCode ?? (p.kind === "stdio" ? STDIO_STARTER : ""));
+      if (p.examples[0]) setTestInput(p.examples[0].input);
     }
   }, [id, problemId]);
 
   async function runOnce() {
+    if (!problem) return;
     setRunning(true);
     setOutput("");
     try {
-      const result = await runPython(source, stdin);
-      setOutput(
-        `exit ${result.exitCode} · ${result.durationMs.toFixed(0)}ms\n` +
-          `--- stdout ---\n${result.stdout}\n` +
-          `--- stderr ---\n${result.stderr}`,
-      );
+      if (problem.kind === "function") {
+        const result = await runLeetCodeCustom(
+          problem.testPrompt ?? "",
+          source,
+          problem.entryPoint ?? "",
+          parseLcArgs(testInput),
+        );
+        setOutput(
+          result.ok
+            ? `result: ${result.result}\n(${result.durationMs.toFixed(0)}ms)`
+            : `error: ${result.stderr}`,
+        );
+      } else {
+        const result = await runPython(source, testInput);
+        setOutput(
+          `exit ${result.exitCode} · ${result.durationMs.toFixed(0)}ms\n` +
+            `--- stdout ---\n${result.stdout}\n` +
+            `--- stderr ---\n${result.stderr}`,
+        );
+      }
     } catch (e) {
       setOutput(`error: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -75,12 +96,50 @@ export default function ProblemPage({
     setSubmitting(true);
     setVerdict(null);
     const submittedAt = Date.now() - contest.createdAt;
-    const tests: TestCase[] = [...problem.examples, ...(problem.hiddenTests ?? [])];
 
-    if (tests.length === 0) {
-      setOutput(
-        "This problem has no built-in test bank (Codeforces problems require external tests). Use the Run panel to test with custom input, or open the problem URL.",
+    if (problem.kind === "function") {
+      const result = await runLeetCodeSubmit(
+        problem.testPrompt ?? "",
+        source,
+        problem.entryPoint ?? "",
+        problem.testHarness ?? "",
       );
+      const submission: Submission = {
+        problemId: problem.id,
+        language: "python",
+        source,
+        verdict: result.passed
+          ? "accepted"
+          : result.failure?.message.startsWith("AssertionError") ||
+              result.failure?.message.includes("assertion")
+            ? "wrong_answer"
+            : "runtime_error",
+        timeMs: result.durationMs,
+        passedTests: result.passedTests,
+        totalTests: result.totalTests,
+        failures: result.failure
+          ? [
+              {
+                input: result.failure.testLine,
+                expected: "",
+                actual: result.failure.message,
+              },
+            ]
+          : undefined,
+        submittedAt,
+      };
+      setVerdict(submission);
+      const updated = applySubmission(contest, submission);
+      saveContest(updated);
+      setContest({ ...updated });
+      setSubmitting(false);
+      return;
+    }
+
+    // stdio path
+    const tests: TestCase[] = [...problem.examples, ...(problem.hiddenTests ?? [])];
+    if (tests.length === 0) {
+      setOutput("This problem has no built-in test bank.");
       setSubmitting(false);
       return;
     }
@@ -181,6 +240,9 @@ export default function ProblemPage({
                 rating {problem.rating}
               </span>
               <span className="text-xs text-zinc-500">· {problem.source}</span>
+              <span className="text-xs text-zinc-500">
+                · {problem.kind === "function" ? "function" : "stdio"}
+              </span>
             </div>
             <h1 className="text-xl font-bold">{problem.title}</h1>
             <div className="text-xs text-zinc-500 mt-1">
@@ -241,10 +303,14 @@ export default function ProblemPage({
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Custom stdin</label>
+            <label className="block text-xs text-zinc-500 mb-1">
+              {problem.kind === "function"
+                ? `Run args (passed to ${problem.entryPoint})`
+                : "Custom stdin"}
+            </label>
             <textarea
-              value={stdin}
-              onChange={(e) => setStdin(e.target.value)}
+              value={testInput}
+              onChange={(e) => setTestInput(e.target.value)}
               className="w-full h-20 bg-zinc-900 border border-zinc-800 rounded p-2 font-mono text-xs"
             />
           </div>
@@ -275,12 +341,20 @@ export default function ProblemPage({
               </div>
               {verdict.failures && verdict.failures[0] && (
                 <div className="mt-2 text-xs font-mono">
-                  <div className="text-zinc-400">Input</div>
-                  <pre className="whitespace-pre-wrap">{verdict.failures[0].input}</pre>
-                  <div className="text-zinc-400 mt-1">Expected</div>
-                  <pre className="whitespace-pre-wrap">
-                    {verdict.failures[0].expected}
-                  </pre>
+                  {verdict.failures[0].input && (
+                    <>
+                      <div className="text-zinc-400">Failed on</div>
+                      <pre className="whitespace-pre-wrap">{verdict.failures[0].input}</pre>
+                    </>
+                  )}
+                  {verdict.failures[0].expected && (
+                    <>
+                      <div className="text-zinc-400 mt-1">Expected</div>
+                      <pre className="whitespace-pre-wrap">
+                        {verdict.failures[0].expected}
+                      </pre>
+                    </>
+                  )}
                   <div className="text-zinc-400 mt-1">Actual</div>
                   <pre className="whitespace-pre-wrap">
                     {verdict.failures[0].actual}
@@ -293,6 +367,16 @@ export default function ProblemPage({
       </div>
     </div>
   );
+}
+
+/**
+ * The LeetCode dataset's example.input is formatted like
+ * `nums = [3,3], target = 6` — exactly what we want as Python kwargs.
+ * Just pass it through. If a user types something weird we let Python
+ * raise.
+ */
+function parseLcArgs(s: string): string {
+  return s.trim();
 }
 
 function formatTime(ms: number): string {

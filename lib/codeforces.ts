@@ -72,6 +72,7 @@ function toProblem(p: BundledProblem, difficulty: Difficulty): Problem {
   return {
     id: p.id,
     source: "codeforces",
+    kind: "stdio",
     title: p.title,
     difficulty,
     rating: p.rating,

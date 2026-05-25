@@ -1,6 +1,7 @@
 export type Difficulty = "easy" | "easy-medium" | "medium" | "hard";
 
-export type ProblemSource = "codeforces" | "generated";
+export type ProblemSource = "codeforces" | "leetcode" | "generated";
+export type ProblemKind = "stdio" | "function";
 
 export interface TestCase {
   input: string;
@@ -10,15 +11,20 @@ export interface TestCase {
 export interface Problem {
   id: string;
   source: ProblemSource;
+  kind: ProblemKind;
   title: string;
   difficulty: Difficulty;
-  rating: number; // numeric difficulty 800-3500 (Codeforces scale)
+  rating: number;
   tags: string[];
   statement: string; // markdown
   examples: TestCase[];
   hiddenTests?: TestCase[];
   starterCode?: string;
   url?: string;
+  // LeetCode (function-style) only:
+  entryPoint?: string; // e.g. "Solution().twoSum"
+  testPrompt?: string; // imports + helper classes (ListNode etc)
+  testHarness?: string; // full `def check(candidate): assert ...` block
 }
 
 export interface Submission {

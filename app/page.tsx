@@ -22,8 +22,9 @@ const PATTERNS = [
 export default function Home() {
   const router = useRouter();
   const [history, setHistory] = useState<Contest[]>([]);
+  const [source, setSource] = useState<"leetcode" | "codeforces" | "mixed">("leetcode");
   const [pattern, setPattern] = useState("");
-  const [generatedCount, setGeneratedCount] = useState(1);
+  const [generatedCount, setGeneratedCount] = useState(0);
   const [durationMin, setDurationMin] = useState(90);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,7 @@ export default function Home() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          source,
           generatedCount,
           pattern: pattern || undefined,
           durationMs: durationMin * 60 * 1000,
@@ -72,6 +74,19 @@ export default function Home() {
         <h2 className="text-xl font-semibold mb-4">Start a new contest</h2>
 
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-zinc-400 mb-1">Problem source</label>
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as typeof source)}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
+            >
+              <option value="leetcode">LeetCode (function signature + full judge)</option>
+              <option value="codeforces">Codeforces (stdio, full statements + tests)</option>
+              <option value="mixed">Mixed (alternates LeetCode and Codeforces)</option>
+            </select>
+          </div>
+
           <div>
             <label className="block text-sm text-zinc-400 mb-1">Pattern bias</label>
             <select

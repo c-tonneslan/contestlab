@@ -70,6 +70,7 @@ export async function generateProblem(
   return {
     id: `gen-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
     source: "generated",
+    kind: "stdio",
     title: generated.title,
     difficulty,
     rating: Math.floor((lo + hi) / 2),
