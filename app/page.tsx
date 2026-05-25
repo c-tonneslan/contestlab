@@ -1,65 +1,167 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { listContests, saveContest } from "@/lib/storage";
+import type { Contest } from "@/types";
+
+const PATTERNS = [
+  { id: "", label: "Any" },
+  { id: "implementation", label: "Implementation" },
+  { id: "greedy", label: "Greedy" },
+  { id: "dp", label: "DP" },
+  { id: "graphs", label: "Graphs" },
+  { id: "trees", label: "Trees" },
+  { id: "binary search", label: "Binary search" },
+  { id: "two pointers", label: "Two pointers" },
+  { id: "strings", label: "Strings" },
+  { id: "math", label: "Math" },
+];
 
 export default function Home() {
+  const router = useRouter();
+  const [history, setHistory] = useState<Contest[]>([]);
+  const [pattern, setPattern] = useState("");
+  const [generatedCount, setGeneratedCount] = useState(1);
+  const [durationMin, setDurationMin] = useState(90);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHistory(listContests());
+  }, []);
+
+  async function startContest() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/contest/new", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          generatedCount,
+          pattern: pattern || undefined,
+          durationMs: durationMin * 60 * 1000,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create contest");
+      const contest = data.contest as Contest;
+      saveContest(contest);
+      router.push(`/contest/${contest.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="max-w-3xl mx-auto p-8">
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold">contestlab</h1>
+        <p className="text-zinc-400 mt-1">
+          LeetCode-style coding contests with a real judge. Codeforces problems +
+          AI-generated novel problems, scored with time decay and wrong-attempt
+          penalties.
+        </p>
+      </header>
+
+      <section className="border border-zinc-800 rounded p-6 mb-8">
+        <h2 className="text-xl font-semibold mb-4">Start a new contest</h2>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-zinc-400 mb-1">Pattern bias</label>
+            <select
+              value={pattern}
+              onChange={(e) => setPattern(e.target.value)}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+              {PATTERNS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-1">
+              AI-generated problems (out of 4)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={4}
+              value={generatedCount}
+              onChange={(e) => setGeneratedCount(Number(e.target.value))}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <p className="text-xs text-zinc-500 mt-1">
+              Generated problems fill the harder slots first. 0 = pure Codeforces,
+              4 = pure novel problems.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm text-zinc-400 mb-1">
+              Duration (minutes)
+            </label>
+            <input
+              type="number"
+              min={15}
+              max={240}
+              value={durationMin}
+              onChange={(e) => setDurationMin(Number(e.target.value))}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
+            />
+          </div>
+
+          <button
+            onClick={startContest}
+            disabled={loading}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 text-white font-medium rounded px-4 py-2"
           >
-            Documentation
-          </a>
+            {loading ? "Assembling contest..." : "Start"}
+          </button>
+
+          {error && <div className="text-red-400 text-sm">{error}</div>}
         </div>
-      </main>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold mb-4">Previous contests</h2>
+        {history.length === 0 ? (
+          <p className="text-zinc-500 text-sm">None yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {history.map((c) => (
+              <li
+                key={c.id}
+                className="border border-zinc-800 rounded p-3 flex justify-between items-center"
+              >
+                <div>
+                  <Link
+                    href={`/contest/${c.id}`}
+                    className="text-emerald-400 hover:text-emerald-300 font-mono text-sm"
+                  >
+                    {c.id}
+                  </Link>
+                  <div className="text-xs text-zinc-500 mt-1">
+                    {new Date(c.createdAt).toLocaleString()} · solved{" "}
+                    {Object.keys(c.solvedAt).length}/4
+                  </div>
+                </div>
+                {c.finalScore !== undefined && (
+                  <div className="text-zinc-300 font-mono">{c.finalScore}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
