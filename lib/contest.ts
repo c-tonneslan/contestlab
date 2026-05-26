@@ -64,3 +64,11 @@ export function applySubmission(contest: Contest, submission: Submission): Conte
 
   return contest;
 }
+
+export function isContestExpired(contest: Contest, now: number = Date.now()): boolean {
+  return now - contest.createdAt >= contest.durationMs;
+}
+
+export function timeRemainingMs(contest: Contest, now: number = Date.now()): number {
+  return Math.max(0, contest.durationMs - (now - contest.createdAt));
+}

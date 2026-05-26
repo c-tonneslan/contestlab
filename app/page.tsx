@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { listContests, saveContest } from "@/lib/storage";
+import { deleteContest, listContests, saveContest } from "@/lib/storage";
+import { contestScore, isContestExpired } from "@/lib/contest";
 import type { Contest } from "@/types";
 
 const PATTERNS = [
@@ -152,28 +153,44 @@ export default function Home() {
           <p className="text-zinc-500 text-sm">None yet.</p>
         ) : (
           <ul className="space-y-2">
-            {history.map((c) => (
-              <li
-                key={c.id}
-                className="border border-zinc-800 rounded p-3 flex justify-between items-center"
-              >
-                <div>
-                  <Link
-                    href={`/contest/${c.id}`}
-                    className="text-emerald-400 hover:text-emerald-300 font-mono text-sm"
-                  >
-                    {c.id}
-                  </Link>
-                  <div className="text-xs text-zinc-500 mt-1">
-                    {new Date(c.createdAt).toLocaleString()} · solved{" "}
-                    {Object.keys(c.solvedAt).length}/4
+            {history.map((c) => {
+              const score = c.finalScore ?? contestScore(c);
+              const expired = isContestExpired(c);
+              return (
+                <li
+                  key={c.id}
+                  className="border border-zinc-800 rounded p-3 flex justify-between items-center gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/contest/${c.id}`}
+                      className="text-emerald-400 hover:text-emerald-300 font-mono text-sm"
+                    >
+                      {c.id}
+                    </Link>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      {new Date(c.createdAt).toLocaleString()} · solved{" "}
+                      {Object.keys(c.solvedAt).length}/4
+                      {expired ? " · ended" : " · live"}
+                    </div>
                   </div>
-                </div>
-                {c.finalScore !== undefined && (
-                  <div className="text-zinc-300 font-mono">{c.finalScore}</div>
-                )}
-              </li>
-            ))}
+                  <div className="flex items-center gap-3">
+                    <div className="text-zinc-300 font-mono">{score}</div>
+                    <button
+                      onClick={() => {
+                        if (!confirm("Delete this contest? This can't be undone.")) return;
+                        deleteContest(c.id);
+                        setHistory(listContests());
+                      }}
+                      className="text-zinc-500 hover:text-red-400 text-xs"
+                      aria-label="delete contest"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

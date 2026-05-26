@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 import CodeEditor from "@/components/Editor";
 import Timer from "@/components/Timer";
 import { loadContest, saveContest } from "@/lib/storage";
-import { applySubmission } from "@/lib/contest";
+import { applySubmission, isContestExpired } from "@/lib/contest";
 import {
   getPyodide,
   normalizeOutput,
@@ -44,7 +44,12 @@ export default function ProblemPage({
   const [pyodideStatus, setPyodideStatus] = useState<string>("Loading Python runtime...");
 
   useEffect(() => {
-    getPyodide(setPyodideStatus).then(() => setPyodideStatus("ready"));
+    getPyodide(setPyodideStatus)
+      .then(() => setPyodideStatus("ready"))
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : "unknown error";
+        setPyodideStatus(`Python runtime failed to load: ${msg}`);
+      });
   }, []);
 
   useEffect(() => {
@@ -93,6 +98,10 @@ export default function ProblemPage({
 
   async function submit() {
     if (!contest || !problem) return;
+    if (isContestExpired(contest)) {
+      setOutput("Contest is over. Submissions are closed.");
+      return;
+    }
     setSubmitting(true);
     setVerdict(null);
     const submittedAt = Date.now() - contest.createdAt;
@@ -211,9 +220,10 @@ export default function ProblemPage({
   }
 
   const solvedAt = contest.solvedAt[problem.id];
+  const expired = isContestExpired(contest);
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
+    <div className="max-w-7xl mx-auto p-4 md:p-6">
       <div className="flex items-center justify-between mb-4">
         <Link
           href={`/contest/${contest.id}`}
@@ -229,8 +239,15 @@ export default function ProblemPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        <div className="space-y-4 overflow-y-auto max-h-[80vh] pr-2">
+      {expired && (
+        <div className="mb-4 border border-zinc-700 bg-zinc-900 rounded p-3 text-sm text-zinc-300">
+          Contest is over. You can still run code for practice, but submissions
+          are closed.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-4 md:overflow-y-auto md:max-h-[80vh] md:pr-2">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs uppercase font-semibold text-emerald-400">
@@ -295,10 +312,11 @@ export default function ProblemPage({
             </button>
             <button
               onClick={submit}
-              disabled={submitting || pyodideStatus !== "ready"}
+              disabled={submitting || pyodideStatus !== "ready" || expired}
               className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded px-3 py-2 text-sm font-medium"
+              title={expired ? "Contest is over" : undefined}
             >
-              {submitting ? "Judging..." : "Submit"}
+              {submitting ? "Judging..." : expired ? "Submissions closed" : "Submit"}
             </button>
           </div>
 

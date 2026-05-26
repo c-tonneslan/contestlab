@@ -39,3 +39,8 @@ export function listContests(): Contest[] {
   }
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
+
+export function deleteContest(id: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(PREFIX + id);
+}
